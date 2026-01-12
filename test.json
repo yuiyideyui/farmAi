@@ -1,0 +1,27 @@
+{
+  "agent_status": {
+    "current_pos": [5, 5],
+    "water_bucket": "30%",
+    "energy": "高",
+    "hunger": 25,
+    "san": 40
+  },
+  "static_facilities": {
+    "水井": {"pos": [1, 1]},
+    "谷仓": {"pos": [10, 10]}
+  },
+  "dynamic_entities": [
+    {
+      "name": "玉米_01",
+      "pos": [3, 4],
+      "status": "成熟",
+      "needs": "harvest"
+    },
+    {
+      "name": "向日葵_02",
+      "pos": [7, 8],
+      "status": "干旱",
+      "needs": "water"
+    }
+  ]
+}
