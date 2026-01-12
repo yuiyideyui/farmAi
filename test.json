@@ -3,12 +3,40 @@
     "current_pos": [5, 5],
     "water_bucket": "30%",
     "energy": "高",
-    "hunger": 25,
+    "water": 10,
+    "hunger": 100,
     "san": 40
   },
+  "inventory": {
+    "面包": {
+      "amount": 2,
+      "value": 10,
+      "description": "美味的面包,使用+10饥饿"
+    },
+    "矿泉水": {
+      "amount": 2,
+      "value": 10,
+      "description": "矿泉水,使用+10饥渴"
+    },
+    "普通锄头": {
+      "amount": 2,
+      "value": 10,
+      "description": "普通锄头"
+    },
+    "喷壶": {
+      "amount": 2,
+      "value": 10,
+      "description": "喷壶"
+    },
+    "玉米种子": {
+      "amount": 2,
+      "value": 10,
+      "description": "玉米种子"
+    }
+  },
   "static_facilities": {
-    "水井": {"pos": [1, 1]},
-    "谷仓": {"pos": [10, 10]}
+    "水井": { "pos": [1, 1] },
+    "谷仓": { "pos": [10, 10] }
   },
   "dynamic_entities": [
     {
