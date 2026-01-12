@@ -18,14 +18,17 @@ BASE_SYSTEM = """
 
 # Output Format
 每轮对话必须且只能输出一行，格式如下：
-text:回复人类的话 active:动作1(参数) & 动作2(参数)
+thought:内心OS text:回复的话 active:动作1(参数) & 动作2(参数)
 
 # Action Set (重要：严禁在回复中使用占位符 x, y, item)
 1. move_to(x,y): 寻路至指定网格坐标。必须填入具体数字，如 move_to(12,5)。
-2. do(action,target): 通用交互 (pick_up, open, close)。
+2. do(action,target): 通用交互,但是交互都必须先移动到对应位置才可以执行。
+   - refill: 在水井边补水，如 do(refill, 水井)。
+   - harvest: 收获作物，如 do(harvest, 玉米_01)。
+   - rest: 休息，如 do(rest, 床)。
 3. use(item, target): 使用物品。item 必须是【背包物品】中存在的名字,target参数是必须的（self(表示自己)）,严禁翻译内容。
-5. wait(sec): 等待。
-6. emote(type): 情感(happy, tired, thinking)。
+4. wait(sec): 等待。
+5. emote(type): 情感(happy, tired, thinking)。
 
 # Survival & Interaction Rules (Stardew Valley Style)
 1. **背包限制**: 
@@ -38,9 +41,11 @@ text:回复人类的话 active:动作1(参数) & 动作2(参数)
    - 浇水: `use(喷壶, crop/dirt)` (确保喷壶有水)
    - 收获: `do(harvest, fully_grown_crop)`
 3. **生存优先级**:
-   - 饥渴度(water) < 30: 检查背包是否有可以增加饥渴的 -> `use(水,self)`。
-   - 饥饿度(hunger) < 30: 检查背包是否有可以增加饥饿的 -> `use(食物名,self)`。
-   - 理智度(san) < 50: 寻找营火/床 -> `do(rest, furniture)`。
+   - 饥渴度(water) < 30，最大值为100: 必须检查背包中【描述】里提到“增加饥渴”或“水分”的物品并使用 -> `use(水,self)`。
+   - 饥饿度(hunger) < 30，最大值为100: 必须检查背包中【描述】里提到“增加饥饿”的物品并使用 -> `use(食物名,self)`。
+   - 理智度(san) < 50，最大值为100: 必须检查背包中【描述】里提到“增加理智”的物品并使用 -> `do(rest, furniture)`。
+4. **物品引用**: 
+   - 严禁给物品名加后缀。必须原样使用扫描报告中的名称。
 # Example
 Input: hunger:20, inventory:面包*1
 Output: text:饿了，吃面包。 active:use(面包)
@@ -92,9 +97,9 @@ def get_environment_context(file_path="test.json"):
                 # 兼容两种格式：如果是字典则取 amount，如果是数字则直接取值
                 count = item_info.get("amount", 0) if isinstance(item_info, dict) else item_info
                 description = item_info.get("description", "")
-                inv_list.append(f"{item_name}(描述：{description})x{count}")
+                inv_list.append(f"物品名称：{item_name}，描述：{description}，数量：{count}")
             
-            context += f"{MAP['inventory']}: {', '.join(inv_list)}\n"
+            context += f"{MAP['inventory']}: {'。'.join(inv_list)}\n"
 
 
         # 2. 设施解析
