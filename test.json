@@ -1,55 +1,87 @@
 {
-  "agent_status": {
-    "current_pos": [5, 5],
-    "water_bucket": "30%",
-    "energy": "高",
-    "water": 10,
-    "hunger": 100,
-    "san": 40
-  },
-  "inventory": {
-    "面包": {
-      "amount": 2,
-      "value": 10,
-      "description": "美味的面包,使用+10饥饿"
-    },
-    "矿泉水": {
-      "amount": 2,
-      "value": 10,
-      "description": "矿泉水,使用+10饥渴"
-    },
-    "普通锄头": {
-      "amount": 2,
-      "value": 10,
-      "description": "普通锄头"
-    },
-    "喷壶": {
-      "amount": 2,
-      "value": 10,
-      "description": "喷壶"
-    },
-    "玉米种子": {
-      "amount": 2,
-      "value": 10,
-      "description": "玉米种子"
+  "export_time": "2026-01-13 01:20:00",
+  "player_status": {
+    "nutrition": 55,
+    "health": 100,
+    "hydration": 100, 
+    "pos": { "grid_x": 36, "grid_y": 2 },
+    "inventory": {
+      "capacity": 20,
+      "used": 5,
+      "items": [
+        {
+          "n": "石斧",
+          "id": "stone_axe",
+          "count": 1,
+          "description": "用来砍树的工具。攻击力+5。",
+          "meta": { "durability": 85 }
+        },
+        {
+          "n": "番茄种子",
+          "id": "seed_tomato",
+          "count": 4,
+          "description": "番茄种子，可以在农田（soil）上种植。",
+          "meta": { "type": "seed" }
+        },
+        {
+          "n": "番茄",
+          "id": "TomatoPlant",
+          "count": 4,
+          "description": "番茄,使用后身体能量储备+10。",
+          "meta": { "type": "food" }
+        },
+        {
+          "n": "纯净水",
+          "id": "water",
+          "count": 7,
+          "description": "纯净水,使用后身体含水量+10。",
+          "meta": { "type": "water" }
+        },
+        {
+          "n": "空木桶",
+          "id": "empty_bucket",
+          "count": 1,
+          "description": "一个空的木桶，可以用来在井边提水。",
+          "meta": { "type": "container", "is_filled": false }
+        }
+      ]
     }
   },
-  "static_facilities": {
-    "水井": { "pos": [1, 1] },
-    "谷仓": { "pos": [10, 10] }
+  "map_layers": {
+    "Farmland": [
+      {
+        "t": "soil",
+        "nav": true,
+        "interactive": true,
+        "description": "农田，你可以使用种子在这里种植。",
+        "x": 36, "y": 2, "w": 5, "h": 5
+      },
+      {
+        "t": "soil",
+        "nav": true,
+        "interactive": true,
+        "description": "农作物番茄，还不能收获，成长中",
+        "x": 36, "y": 2, "w": 1, "h": 1
+      }
+    ],
+    "Water": [
+      {
+        "t": "well_base", 
+        "nav": false, 
+        "interactive": true,
+        "description": "井，你可以在这里获取一瓶纯净水。",
+        "x": 42, "y": 3, "w": 1, "h": 1 
+      }
+    ]
   },
-  "dynamic_entities": [
+  "entities": [
     {
-      "name": "玉米_01",
-      "pos": [3, 4],
-      "status": "成熟",
-      "needs": "harvest"
-    },
-    {
-      "name": "向日葵_02",
-      "pos": [7, 8],
-      "status": "干旱",
-      "needs": "water"
+      "n": "OldOakTree",
+      "grid_p": { "x": 38, "y": 3 },
+      "is_ready": true,
+      "interactive": true,
+      "description": "一棵大橡树。需要斧头才能砍伐。砍到后获取木头+5",
+      "meta": { "type": "tree", "require_tool": "axe" }
     }
   ]
 }

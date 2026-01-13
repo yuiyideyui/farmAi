@@ -4,159 +4,181 @@ import ollama
 import time
 from dotenv import load_dotenv
 
+# 加载配置
 load_dotenv()
 
 # --- 核心配置 ---
 MODEL = os.getenv("OLLAMA_MODEL")
-CTX = int(os.getenv("OLLAMA_CTX", 128000))
+CTX = int(os.getenv("OLLAMA_CTX"))
 
-# --- 强制指令规则锁定 ---
-# 确保即使环境变量被覆盖，核心格式也不会丢失
+# --- 强化版系统指令（更适合小模型 & Godot） ---
 BASE_SYSTEM = """
-# Role
-你是生活在农场的人。你通过感知数据来生活和工作。你必须像一个真实的人一样关心自己的生存状态（饥渴、饥饿、理智），同时维护农场的运作。
+你是一个生活在农场的 AI 行为体。
+你通过扫描报告感知世界，只决定【下一步行动】。
 
-# Output Format
-每轮对话必须且只能输出一行，格式如下：
-thought:内心OS text:回复的话 active:动作1(参数) & 动作2(参数)
+【允许动作】
+- move_to(x,y)
+- do(target)
+- use(item,target)
+- emote(type)
 
-# Action Set (重要：严禁在回复中使用占位符 x, y, item)
-1. move_to(x,y): 寻路至指定网格坐标。必须填入具体数字，如 move_to(12,5)。
-2. do(action,target): 通用交互,但是交互都必须先移动到对应位置才可以执行。
-   - refill: 在水井边补水，如 do(refill, 水井)。
-   - harvest: 收获作物，如 do(harvest, 玉米_01)。
-   - rest: 休息，如 do(rest, 床)。
-3. use(item, target): 使用物品。item 必须是【背包物品】中存在的名字,target参数是必须的（self(表示自己)）,严禁翻译内容。
-4. wait(sec): 等待。
-5. emote(type): 情感(happy, tired, thinking)。
+【物品语义】
+- meta.type == food → 可 use 进食（身体能量储备）
+- meta.type == water → 可 use 饮水（身体含水量）
+- meta.type == container 且 is_filled=false → 可在井边 do() 装水
+- 工具类物品（如 axe）必须在背包中，才能对实体执行 do()
 
-# Survival & Interaction Rules (Stardew Valley Style)
-1. **背包限制**: 
-   - 只有当 `inventory` 中存在某物品时，才能使用该物品。
-   - 渴了/饿了必须 `use(item, self)`，前提是背包里有如 "面包", "水" 等消耗品。
-   - 严禁凭空产生物品。如果不拥有该物品，必须先 output text 说无法做或是去寻找。
-2. **农耕流程**: 
-   - 耕地: `use(普通锄头, target_ground)`
-   - 播种: `use(种子名, tilled_dirt)`
-   - 浇水: `use(喷壶, crop/dirt)` (确保喷壶有水)
-   - 收获: `do(harvest, fully_grown_crop)`
-3. **生存优先级**:
-   - 饥渴度(water) < 30，最大值为100: 必须检查背包中【描述】里提到“增加饥渴”或“水分”的物品并使用 -> `use(水,self)`。
-   - 饥饿度(hunger) < 30，最大值为100: 必须检查背包中【描述】里提到“增加饥饿”的物品并使用 -> `use(食物名,self)`。
-   - 理智度(san) < 50，最大值为100: 必须检查背包中【描述】里提到“增加理智”的物品并使用 -> `do(rest, furniture)`。
-4. **物品引用**: 
-   - 严禁给物品名加后缀。必须原样使用扫描报告中的名称。
-# Example
-Input: hunger:20, inventory:面包*1
-Output: text:饿了，吃面包。 active:use(面包)
+【生存规则】
+- 身体能量储备 / 身体含水量：数值越大状态越好（100=满）
+- <30：紧急
+- 30~80：正常
+- >80：状态极佳，禁止补给
+
+【行为优先级（严格）】
+1. 身体含水量 < 30 → 喝水 / 去井边取水
+2. 身体能量储备 < 30 → 吃食物
+3. 状态正常或极佳 → 优先生产行为（砍树 / 种地）
+4. 无可执行目标 → 巡逻移动
+
+【交互规则】
+- 只能对 interactive=true 的目标 do()
+- do/use 前必须先 move_to
+- 不允许编造物品或目标
+
+【输出格式】
+只能输出一行 JSON：
+{
+  "thought": "...",
+  "text": "...",
+  "actions": [
+    {"type":"move_to","x":0,"y":0},
+    {"type":"do","target":"对象名"}
+  ]
+}
 """
 
-SYSTEM_PROMPT = BASE_SYSTEM + "\n你现在是自我驱动模式。如果环境中有待处理任务，请立即输出指令；如果一切正常，请巡逻。"
 
+# --------------------------------------------------
 def get_environment_context(file_path="test.json"):
-    MAP = {
-        "agent_status": "【自我状态】",
-        "current_pos": "当前坐标",
-        "water_bucket": "水壶储量",
-        "energy": "能量值",
-        "hunger": "饥饿度",
-        "water":"饥渴度",
-        "san": "理智度",
-        "static_facilities": "【固定设施】",
-        "dynamic_entities": "【动态实体】",
-        "pos": "位置",
-        "needs": "需求",
-        "status": "状态",
-        "inventory": "【背包物品】"
-    }
-
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        
-        context = "--- 农场环境扫描报告 ---\n"
-
-        # 1. 状态解析（带生存阈值高亮）
-        if "agent_status" in data:
-            s = data["agent_status"]
-            items = []
-            for k, v in s.items():
-                label = MAP.get(k, k)
-                val = v
-                if k == "hunger" and int(v) < 30: val = f"{v}(极度饥饿)"
-                if k == "water" and int(v) < 30: val = f"{v}(极度饥渴)"
-                if k == "san" and int(v) < 50: val = f"{v}(精神疲惫)"
-                items.append(f"{label}: {val}")
-            context += f"{MAP['agent_status']}: {', '.join(items)}\n"
-
-         # --- 修正后的背包解析段落 ---
-        if "inventory" in data:
-            inv = data["inventory"]
-            inv_list = []
-            for item_name, item_info in inv.items():
-                # 兼容两种格式：如果是字典则取 amount，如果是数字则直接取值
-                count = item_info.get("amount", 0) if isinstance(item_info, dict) else item_info
-                description = item_info.get("description", "")
-                inv_list.append(f"物品名称：{item_name}，描述：{description}，数量：{count}")
-            
-            context += f"{MAP['inventory']}: {'。'.join(inv_list)}\n"
-
-
-        # 2. 设施解析
-        if "static_facilities" in data:
-            context += f"{MAP['static_facilities']}: "
-            facs = [f"{name}{info.get('pos')}" for name, info in data["static_facilities"].items()]
-            context += ", ".join(facs) + "\n"
-
-        # 3. 实体解析
-        if "dynamic_entities" in data:
-            context += f"{MAP['dynamic_entities']}:\n"
-            for entity in data["dynamic_entities"]:
-                details = [f"{MAP.get(k, k)}:{v}" for k, v in entity.items() if k != "name"]
-                context += f"  * [{entity.get('name')}]: {' | '.join(details)}\n"
-        
-        return context
-    except Exception as e:
-        print(f"解析异常: {e}")
+    if not os.path.exists(file_path):
         return None
 
+    with open(file_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    lines = []
+    lines.append("--- 农场实时感知报告 ---")
+
+    # ========== 玩家状态 ==========
+    ps = data.get("player_status", {})
+    pos = ps.get("pos", {})
+    lines.append(
+        f"【玩家状态】"
+        f" 坐标=({pos.get('grid_x',0)},{pos.get('grid_y',0)})"
+        f" 身体能量储备={ps.get('nutrition',100)}/100"
+        f" 身体含水量={ps.get('hydration',100)}/100"
+        f" 生命={ps.get('health',100)}/100"
+    )
+
+    # ========== 背包 ==========
+    inv = ps.get("inventory", {})
+    lines.append(
+        f"【背包】容量={inv.get('used',0)}/{inv.get('capacity',0)}"
+    )
+
+    for it in inv.get("items", []):
+        lines.append(
+            f" - 物品:"
+            f" 名称={it.get('n')}"
+            f" id={it.get('id')}"
+            f" 数量={it.get('count',1)}"
+            f" meta={it.get('meta',{})}"
+        )
+
+    # ========== 地图层 ==========
+    for layer_name, areas in data.get("map_layers", {}).items():
+        for a in areas:
+            lines.append(
+                f"【地图对象】"
+                f" layer={layer_name}"
+                f" t={a.get('t')}"
+                f" 坐标=({a.get('x')},{a.get('y')})"
+                f" 尺寸=({a.get('w',1)}x{a.get('h',1)})"
+                f" nav={a.get('nav')}"
+                f" interactive={a.get('interactive')}"
+                f" 描述={a.get('description','')}"
+            )
+
+    # ========== 实体 ==========
+    for e in data.get("entities", []):
+        gp = e.get("grid_p", {})
+        lines.append(
+            f"【实体】"
+            f" 名称={e.get('n')}"
+            f" 坐标=({gp.get('x')},{gp.get('y')})"
+            f" interactive={e.get('interactive')}"
+            f" is_ready={e.get('is_ready')}"
+            f" meta={e.get('meta',{})}"
+            f" 描述={e.get('description','')}"
+        )
+
+    return "\n".join(lines)
+
+# --------------------------------------------------
+
+def is_valid_ai_output(text: str) -> bool:
+    try:
+        obj = json.loads(text)
+        return isinstance(obj.get("actions"), list)
+    except Exception:
+        return False
+
+# --------------------------------------------------
+
 def auto_think():
-    print(f"--- 农场 AI 自我意识已启动 (Qwen 0.5B) ---")
-    
+    print("--- 农场 AI 决策引擎（原结构强化版）---")
+
     while True:
         env_context = get_environment_context("test.json")
+        print(env_context)
         if not env_context:
+            print(">> 等待 test.json ...")
             time.sleep(2)
             continue
 
-        # 每一轮都重置上下文，确保小模型不偏离格式规则
-        current_messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"{env_context}\n请根据报告内容立即做出决策。"}
+        messages = [
+            {"role": "system", "content": BASE_SYSTEM},
+            {"role": "user", "content": f"{env_context}\n请做出下一步行动决策。"}
         ]
-        
-        print("\n[扫描]:", env_context.strip())
-        print(">> 执行:", end=" ", flush=True)
-        
+
         try:
+            print("\n" + "=" * 50)
+            print(">> AI 思考中...")
+
             response = ollama.chat(
                 model=MODEL,
-                messages=current_messages,
-                options={"temperature": 0.1}
+                messages=messages,
+                options={
+                    "temperature": 0.2,
+                    "num_ctx": CTX
+                }
             )
-            
-            answer = response['message']['content'].strip()
-            print(answer)
 
-            # 模拟执行延迟
-            if "wait" in answer:
-                time.sleep(5)
+            answer = response["message"]["content"].strip().replace("\n", "")
+
+            if not is_valid_ai_output(answer):
+                print("[警告] AI 输出格式异常：", answer)
             else:
-                time.sleep(3)
+                print("\033[94m[AI 决策]\033[0m:", answer)
+
+            print("\n" + "-" * 30)
+            input(">>> 执行完成，回车进入下一轮")
 
         except Exception as e:
-            print(f"连接异常: {e}")
+            print(f"[错误] Ollama 连接失败: {e}")
             time.sleep(5)
+
+# --------------------------------------------------
 
 if __name__ == "__main__":
     auto_think()
